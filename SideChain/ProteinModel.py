@@ -54,7 +54,9 @@ class ProteinResidue (ProteinContainer):
 
 
 class ProteinAtom (ProteinContainer):
-    pass
+    @property
+    def coordinates (self):
+        return numpy.array ((self.x, self.y, self.z))
 
 
 class ProteinModel (object):
@@ -175,7 +177,7 @@ class ProteinModel (object):
         self._Write ("Created model chain:residue:protein")
 
 
-    def AddHydrogens (self, pH=7.0):
+    def AddHydrogens (self):
         """Adds missing hydrogens."""
 
         for chain in self.chains:
@@ -195,24 +197,18 @@ class ProteinModel (object):
                 ictable = self.internal[residue.label]
 
                 for hydrogen in hydrogens:
-                    entries = self._SearchFormatInternal (ictable, hydrogen)
-                    if (entries == []):
-                        # raise exceptions.StandardError ("Atom %s not found in internal coordinates." % hydrogen)
-                        continue
-
-                    i = self._CheckAtomsPresent (residue, entries)
-                    if (i < 0):
-                        # self._Write ("Warning: skipping hydrogen %s in residue %s" % (hydrogen, residue.Label ()))
-                        continue
-                    self._AddAtom (residue, hydrogen, entries[i])
+                    for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in ictable:
+                        if (hydrogen == l):
+                            internal = (i, j, k, distanceRight, angleRight, torsion, improper)
+                            self._AddAtom (residue, hydrogen, internal)
 
 
     def _AddAtom (self, residue, label, internal):
         (a, b, c, distance, angle, torsion, improper) = internal
 
-        pa = self._AtomToVector (residue[a])
-        pb = self._AtomToVector (residue[b])
-        pc = self._AtomToVector (residue[c])
+        pa = residue[a].coordinates
+        pb = residue[b].coordinates
+        pc = residue[c].coordinates
         
         CalculatePosition = self._CalculatePositionImproper if (improper) else self._CalculatePositionNormal
         pd = CalculatePosition (pa, pb, pc, distance, angle, torsion)
@@ -295,30 +291,6 @@ class ProteinModel (object):
                     internal = (i, j, k, distanceRight, angleRight, torsion, improper)
                     self._AddAtom (residue, l, internal)
 
-            # try:
-            #     component = components[residue.label]
-            # except exceptions.KeyError:
-            #     component = self.library[residue.label]
-            #     self._Write ("Picked %s." % residue.label)
-            # 
-            #     component.GenerateAngles ()
-            #     component.GenerateTorsions ()
-            #     components[residue.label] = component
-
-
-            # (torsionTypes, foo, bar) = component._TorsionsToTypes ()
-            # for (torsion, types) in zip (component.torsions, torsionTypes):
-            #     (typea, typeb, typec, typed) = types
-            #     torsionalParameters = self.parameters.GetTorsion (typeb, typec)
-            #     if (not torsionalParameters):
-            #         raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (typeb, typec))
-
-            # missingLabels = []
-            # for atom in component.atoms:
-            #         if (atom.atomLabel not in residue):
-            #             missingLabels.append (atom.atomLabel)
-            # if (missingLabels):
-            #     self._Write ("Residue %s.%s.%d is missing atoms: %s" % (residue.parent.label, residue.label, residue.serial, " ".join (missingLabels)))
 
     @staticmethod
     def _SearchInternal (internalCoordinates, label):
@@ -381,25 +353,11 @@ class ProteinModel (object):
                 if (i < 0):
                     self._Write ("Warning: skipping atom %s." % otherLabel)
                     continue
-                (a, b, c, distance, angle, torsion, improper) = entries[i]
-    
-                pa = self._AtomToVector (residue[a])
-                pb = self._AtomToVector (residue[b])
-                pc = self._AtomToVector (residue[c])
-                
-                CalculatePosition = self._CalculatePositionImproper if (improper) else self._CalculatePositionNormal
-                pd = CalculatePosition (pa, pb, pc, distance, angle, torsion)
-                
-                atom = ProteinAtom (label=otherLabel, serial=-1, x=pd[0], y=pd[1], z=pd[2], parent=residue)
-                residue.AddAtom (atom, reorder=True)
+                self._AddAtom (residue, label, entries[i])
                 self._Write ("Added atom %s to residue %s" % (otherLabel, residue.Label ()))
             
                 self._AddAtomInternal_r (internalCoordinates, connectivityTable, residue, otherLabel)
 
-
-    @staticmethod
-    def _AtomToVector (atom):
-        return numpy.array ((atom.x, atom.y, atom.z))
 
     @staticmethod
     def _VectorNormalize (vector):
@@ -454,12 +412,30 @@ class ProteinModel (object):
 
     def BuildEnergyModel (self):
         """Builds an energy model."""
-        # self.coordinates = numpy.empty ((pdb.natoms, 3))
-        # for residue in pdb.residues:
-        #     for i, (label, serial, x, y, z) in enumerate (residue.atoms):
-        #         self.coordinates[i, 0] = x
-        #         self.coordinates[i, 1] = y
-        #         self.coordinates[i, 2] = z
+        # try:
+        #     component = components[residue.label]
+        # except exceptions.KeyError:
+        #     component = self.library[residue.label]
+        #     self._Write ("Picked %s." % residue.label)
+        # 
+        #     component.GenerateAngles ()
+        #     component.GenerateTorsions ()
+        #     components[residue.label] = component
+
+
+        # (torsionTypes, foo, bar) = component._TorsionsToTypes ()
+        # for (torsion, types) in zip (component.torsions, torsionTypes):
+        #     (typea, typeb, typec, typed) = types
+        #     torsionalParameters = self.parameters.GetTorsion (typeb, typec)
+        #     if (not torsionalParameters):
+        #         raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (typeb, typec))
+
+        # missingLabels = []
+        # for atom in component.atoms:
+        #         if (atom.atomLabel not in residue):
+        #             missingLabels.append (atom.atomLabel)
+        # if (missingLabels):
+        #     self._Write ("Residue %s.%s.%d is missing atoms: %s" % (residue.parent.label, residue.label, residue.serial, " ".join (missingLabels)))
         pass
 
 
