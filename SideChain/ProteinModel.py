@@ -66,11 +66,12 @@ class ProteinAtom (ProteinContainer):
 
 
 class ProteinModel (object):
-    def __init__ (self, pdb, library, internal, parameters, mutations, verbose=True):
+    def __init__ (self, pdb, library, internal, rotatable, parameters, mutations, verbose=True):
         """Constructor."""
         self.pdb = pdb
         self.library = library
         self.internal = internal
+        self.rotatable = rotatable
         self.parameters = parameters
         self.mutations = mutations
         self.verbose = verbose
@@ -447,43 +448,74 @@ class ProteinModel (object):
 
     def _BuildEnergyModel (self):
         """Builds an energy model."""
+        pass
+#        for (i, j) in self.pairs:
+#            chain = self.chains[i]
+#            residue = chain.residues[j]
+#
+#            #if (residue.label not in self.library):
+#            #    raise exceptions.StandardError ("Residue %s not found in the amino-library." % residue.label)
+#
+#            component = self.library[residue.label]
+#            component.GenerateAngles ()
+#            component.GenerateTorsions ()
+#            rotatableTorsions = self.rotatable[residue.label]
+#
+#            self._Write ("Collecting energy terms for residue %s..." % residue.Label ())
+#            self.torsionalTerms = []
+#
+#            for (labelb, labelc) in rotatableTorsions:
+#                (atomb, atomc) = (component[labelb], component[labelc])
+#                (tb, tc) = (atomb.atomType, atomc.atomType)
+#                torsionalParameters = self.parameters.GetTorsion (tb, tc)
+#
+#                if (torsionalParameters is None):
+#                    raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (tb, tc))
+#
+#                #self.torsionalTerms.append (torsionalParameters)
+
+
+    def _IdentifyRotatableAtoms (self):
         for (i, j) in self.pairs:
             chain = self.chains[i]
             residue = chain.residues[j]
-
-            #if (residue.label not in self.library):
-            #    raise exceptions.StandardError ("Residue %s not found in the amino-library." % residue.label)
+            self._Write ("Generating torsions for residue %s..." % residue.Label ())
 
             component = self.library[residue.label]
             component.GenerateAngles ()
             component.GenerateTorsions ()
+            component.GenerateConnectivities ()
 
-            (torsionTypes, foo, bar) = component._TorsionsToTypes ()
+            rotatableTorsions = self.rotatable[residue.label]
 
-            #for (torsion, types) in zip (component.torsions, torsionTypes):
-            #    (typea, typeb, typec, typed) = types
-            #    torsionalParameters = self.parameters.GetTorsion (typeb, typec)
-            #    if (torsionalParameters is None):
-            #        raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (typeb, typec))
+            for (labelb, labelc) in rotatableTorsions:
+                rotateAtoms = []
+                roots = []
+                self._GetRotatableAtoms_r (labelb, labelc, component.connectivity, rotateAtoms, roots)
+
+                self._Write ("Torsion X-%s-%s-X rotatable atoms: %s" % (labelb, labelc, " ".join (rotateAtoms)))
+
+
+    def _GetRotatableAtoms_r (self, precedingLabel, rootLabel, connectivityTable, atoms, roots):
+        connections = connectivityTable[rootLabel]
+        roots.append (rootLabel)
+
+        for connection in connections:
+            if (connection != precedingLabel):
+                atoms.append (connection)
+                if (connection not in roots):
+                    self._GetRotatableAtoms_r (rootLabel, connection, connectivityTable, atoms, roots)
 
 
     def Optimize (self):
         """Optimizes side-chain positions with Monte Carlo."""
-        if not hasattr (self, "energyModel"):
-            self._BuildEnergyModel ()
+        #if not hasattr (self, "energyModel"):
+        #    self._BuildEnergyModel ()
+
+        self._IdentifyRotatableAtoms ()
 
 
-    def DumpAsXYZ (self, filename="mutant.xyz"):
-        output = open (filename, "w")
-        output.write ("%d\n...\n" % self.natoms)
-        for chain in self.chains:
-            for residue in chain.residues:
-                for atom in residue.atoms:
-                    output.write ("%4s  %8.3f  %8.3f  %8.3f\n" % (atom.label, atom.x, atom.y, atom.z))
-        output.close ()
-
-
-    def DumpAsPDB (self, filename="mutant.pdb"):
+    def SavePDB (self, filename="mutant.pdb"):
         output = open (filename, "w")
         for chain in self.chains:
             for residue in chain.residues:

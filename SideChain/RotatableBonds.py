@@ -40,7 +40,9 @@ class RotatableBonds (object):
         return self.pairs.has_key (component)
 
     def __getitem__ (self, component):
-        return self.pairs[component]
+        if (component in self):
+            return self.pairs[component]
+        raise exceptions.StandardError ("Rotatable bonds for comonent %s not found." % component)
 
     def __len__ (self):
         return len (self.pairs)
