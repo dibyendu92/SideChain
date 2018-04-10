@@ -52,6 +52,12 @@ class ProteinResidue (ProteinContainer):
                     return atom
         raise exceptions.StandardError ("Atom %s not found in residue %s.%d.%s" % (label, self.parent.label, self.serial, self.label))
 
+    @property
+    def natoms (self):
+        if hasattr (self, "atoms"):
+            return len (self.atoms)
+        return 0
+
 
 class ProteinAtom (ProteinContainer):
     @property
@@ -116,10 +122,36 @@ class ProteinModel (object):
         return None
 
 
+    def _CalculateResidueAtoms (self, pdbResidue, skipChains, skipResidues):
+        natoms=0
+        if (pdbResidue.chain not in skipChains):
+            if (pdbResidue.label not in skipResidues):
+                isMutated = self._CheckIfMutated (pdbResidue.chain, pdbResidue.serial)
+                if (isMutated):
+                    for pdbAtom in pdbResidue.atoms:
+                        if (pdbAtom.label in _BACKBONE_ATOMS):
+                            natoms+=1
+                    targetLabel = isMutated
+                    component = self.library[targetLabel]
+                    for atom in component.atoms:
+                        if (atom.atomLabel not in _BACKBONE_ATOMS):
+                            natoms+=1
+                else:
+                    natoms+=len (pdbResidue.atoms)
+        return natoms
+
+
     def Build (self, skipChains=None, skipResidues=_SKIP_RESIDUES):
         """Builds a protein model.
 
         Residues that are subject to mutation start with empty side-chains."""
+        # natoms=0
+        # for residue in self.pdb.residues:
+        #     natoms+=self._CalculateResidueAtoms (residue, skipChains, skipResidues)
+        # self.coordinates = numpy.empty ((natoms, 3))
+        # 
+        # self._Write ("Array allocated for %d atoms." % natoms)
+
         chainLabels = set ()
         for pdbResidue in self.pdb.residues:
             if (skipChains != None):
@@ -129,6 +161,7 @@ class ProteinModel (object):
 
         self.chains = []
         self.pairs = []
+        begin = 0
 
         for (i, chainLabel) in enumerate (chainLabels):
             chain = ProteinChain (label=chainLabel)
@@ -145,6 +178,7 @@ class ProteinModel (object):
                         targetLabel = isMutated
                         residue = ProteinResidue (label = targetLabel, 
                                                   serial = pdbResidue.serial, 
+                                                  begin = begin, 
                                                   parent = chain )
 
                         for pdbAtom in pdbResidue.atoms:
@@ -167,6 +201,7 @@ class ProteinModel (object):
                                                 x = pdbAtom.x, 
                                                 y = pdbAtom.y, 
                                                 z = pdbAtom.z, 
+                                                begin = begin, 
                                                 parent = residue )
                             residue.AddAtom (atom)
                         chain.AddResidue (residue)
@@ -410,39 +445,32 @@ class ProteinModel (object):
         return (c + Rcd * q)
 
 
-    def BuildEnergyModel (self):
+    def _BuildEnergyModel (self):
         """Builds an energy model."""
-        # try:
-        #     component = components[residue.label]
-        # except exceptions.KeyError:
-        #     component = self.library[residue.label]
-        #     self._Write ("Picked %s." % residue.label)
-        # 
-        #     component.GenerateAngles ()
-        #     component.GenerateTorsions ()
-        #     components[residue.label] = component
+        for (i, j) in self.pairs:
+            chain = self.chains[i]
+            residue = chain.residues[j]
 
+            #if (residue.label not in self.library):
+            #    raise exceptions.StandardError ("Residue %s not found in the amino-library." % residue.label)
 
-        # (torsionTypes, foo, bar) = component._TorsionsToTypes ()
-        # for (torsion, types) in zip (component.torsions, torsionTypes):
-        #     (typea, typeb, typec, typed) = types
-        #     torsionalParameters = self.parameters.GetTorsion (typeb, typec)
-        #     if (not torsionalParameters):
-        #         raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (typeb, typec))
+            component = self.library[residue.label]
+            component.GenerateAngles ()
+            component.GenerateTorsions ()
 
-        # missingLabels = []
-        # for atom in component.atoms:
-        #         if (atom.atomLabel not in residue):
-        #             missingLabels.append (atom.atomLabel)
-        # if (missingLabels):
-        #     self._Write ("Residue %s.%s.%d is missing atoms: %s" % (residue.parent.label, residue.label, residue.serial, " ".join (missingLabels)))
-        pass
+            (torsionTypes, foo, bar) = component._TorsionsToTypes ()
+
+            #for (torsion, types) in zip (component.torsions, torsionTypes):
+            #    (typea, typeb, typec, typed) = types
+            #    torsionalParameters = self.parameters.GetTorsion (typeb, typec)
+            #    if (torsionalParameters is None):
+            #        raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (typeb, typec))
 
 
     def Optimize (self):
         """Optimizes side-chain positions with Monte Carlo."""
-        if hasattr (self, "energyModel"):
-            pass
+        if not hasattr (self, "energyModel"):
+            self._BuildEnergyModel ()
 
 
     def DumpAsXYZ (self, filename="mutant.xyz"):
