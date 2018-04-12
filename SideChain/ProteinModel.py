@@ -4,8 +4,9 @@
 # . Copyright : USC, Mikolaj Feliks (2018)
 # . License   : GNU GPL v3.0       (http://www.gnu.org/licenses/gpl-3.0.en.html)
 #-------------------------------------------------------------------------------
-import exceptions, math, numpy
+import exceptions, math, numpy, random
 
+import Utilities
 
 _BACKBONE_ATOMS = ("N", "CA", "C", "O", "+N", "+CA", "-C", )
 _SKIP_RESIDUES = ("HOH", "WAT", )
@@ -52,6 +53,20 @@ class ProteinResidue (ProteinContainer):
                     return atom
         raise exceptions.StandardError ("Atom %s not found in residue %s.%d.%s" % (label, self.parent.label, self.serial, self.label))
 
+    def GetIndex (self, label):
+        if (label in self):
+            for (i, atom) in enumerate (self.atoms):
+                if (label == atom.label):
+                    return i
+        return -1
+
+    def LabelsToIndices (self, labels):
+        indices = []
+        for (i, atom) in enumerate (self.atoms):
+            if (atom.label in labels):
+                indices.append (i)
+        return indices
+
     @property
     def natoms (self):
         if hasattr (self, "atoms"):
@@ -63,6 +78,28 @@ class ProteinAtom (ProteinContainer):
     @property
     def coordinates (self):
         return numpy.array ((self.x, self.y, self.z))
+
+    @coordinates.setter
+    def coordinates (self, array):
+        self.x = array[0]
+        self.y = array[1]
+        self.z = array[2]
+
+
+class RotatableTorsion (ProteinContainer):
+    def __init__ (self, atoms, parent):
+        self.atoms = atoms
+        self.parent = parent
+#        a   = atoms[0].coordinates
+#        b   = atoms[1].coordinates
+#        c   = atoms[2].coordinates
+#        ab  = a - b
+#        j   = Utilities.VectorNormalize (c - b)
+#        k   = Utilities.VectorNormalize (numpy.cross (ab, j))
+#        i   = Utilities.VectorNormalize (numpy.cross (j, k))
+
+    def Rotate (self, degree):
+        pass
 
 
 class ProteinModel (object):
@@ -195,6 +232,7 @@ class ProteinModel (object):
                     else:
                         residue = ProteinResidue (label = pdbResidue.label, 
                                                   serial = pdbResidue.serial, 
+                                                  begin = begin, 
                                                   parent = chain )
                         for pdbAtom in pdbResidue.atoms:
                             atom = ProteinAtom (label = pdbAtom.label, 
@@ -202,7 +240,6 @@ class ProteinModel (object):
                                                 x = pdbAtom.x, 
                                                 y = pdbAtom.y, 
                                                 z = pdbAtom.z, 
-                                                begin = begin, 
                                                 parent = residue )
                             residue.AddAtom (atom)
                         chain.AddResidue (residue)
@@ -285,7 +322,11 @@ class ProteinModel (object):
 
 
     def Mutate (self):
-        """Generates initial conformations of mutated residues."""
+        """Adds missing atoms to mutated residues based on internal coordinates.
+
+        The format of internal coordinates is described in:
+        https://www.charmm.org/charmm/documentation/by-version/c40b1/params/doc/intcor/"""
+
         for (chainLabel, residueSerial, residueTargetLabel) in self.mutations:
             found = self._FindMutation (chainLabel, residueSerial)
             if (not found):
@@ -304,11 +345,9 @@ class ProteinModel (object):
                 raise exceptions.StandardError ("Residue %s not found in the internal coordinate library." % residue.label)
             ictable = self.internal[residue.label]
 
-            #self._AddAtomInternal_r (ictable, component.connectivity, residue, "CA")
-
-            rootLabel = "CA"
-            sequence = []
-            unmet = []
+            # rootLabel = "CA"
+            # sequence = []
+            # unmet = []
             # self._BuildSequence_r (ictable, component.connectivity, rootLabel, sequence, unmet)
             # 
             # self._Write ("Adding atoms for %s in sequence: %s" % (residue.Label (), " ".join (sequence)))
@@ -316,6 +355,8 @@ class ProteinModel (object):
             # for label in sequence:
             #     internal = self._SearchInternal (ictable, label)
             #     self._AddAtom (residue, label, internal)
+
+            # . Internal coordinate tables from CHARMM seem to already contain atoms in "safe" sequences.
 
             for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in ictable:
                 tests = []
@@ -344,27 +385,6 @@ class ProteinModel (object):
         raise exceptions.StandardError ("Atom %s not found in internal coordinates." % label)
 
     @staticmethod
-    def _SearchFormatInternal (internalCoordinates, label):
-        entries = []
-        for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in internalCoordinates:
-            entry = None
-            if (improper):
-                if (l == label):
-                    entry = (i, j, k, distanceRight, angleRight, torsion, improper)
-                elif (i == label):
-                    entry = (l, j, k, distanceLeft, angleLeft, torsion, improper)
-            else:
-                if (l == label):
-                    entry = (i, j, k, distanceRight, angleRight, torsion, improper)
-                elif (i == label):
-                    entry = (l, k, j, distanceLeft, angleLeft, torsion, improper)
-            if (entry != None):
-                entries.append (entry)
-        if (entries is []):
-            raise exceptions.StandardError ("Atom %s not found in internal coordinates." % otherLabel)
-        return entries
-
-    @staticmethod
     def _CheckAtomsPresent (residue, entries):
         for i, (a, b, c, distance, angle, torsion, improper) in enumerate (entries):
             checks = (a in residue, b in residue, c in residue)
@@ -372,35 +392,8 @@ class ProteinModel (object):
                 return i
         return -1
 
-
-    def _AddAtomInternal_r (self, internalCoordinates, connectivityTable, residue, label):
-        """Adds an atom to a residue based on internal coordinates.
-
-        The format of internal coordinates is described in:
-        https://www.charmm.org/charmm/documentation/by-version/c40b1/params/doc/intcor/"""
-
-        connections = connectivityTable[label]
-
-        for otherLabel in connections:
-            if (otherLabel not in residue):
-                entries = self._SearchFormatInternal (internalCoordinates, otherLabel)
-    
-                i = self._CheckAtomsPresent (residue, entries)
-                if (i < 0):
-                    self._Write ("Warning: skipping atom %s." % otherLabel)
-                    continue
-                self._AddAtom (residue, label, entries[i])
-                self._Write ("Added atom %s to residue %s" % (otherLabel, residue.Label ()))
-            
-                self._AddAtomInternal_r (internalCoordinates, connectivityTable, residue, otherLabel)
-
-
     @staticmethod
-    def _VectorNormalize (vector):
-        return (1.0 / numpy.linalg.norm (vector)) * vector
-
-
-    def _CalculatePositionImproper (self, a, b, c, Rcd, Tbcd, Pabcd):
+    def _CalculatePositionImproper (a, b, c, Rcd, Tbcd, Pabcd):
     #                I (a)    L (d)
     #                 \     /
     #                  \   /
@@ -410,9 +403,9 @@ class ProteinModel (object):
     #                   J (b)
     #        values (Rik),(Tikj),(Pijkl),T(jkl),(Rkl)
         ca = a - c
-        j  = self._VectorNormalize (b - c)
-        k  = self._VectorNormalize (numpy.cross (ca, j))
-        i  = self._VectorNormalize (numpy.cross (j, k))
+        j  = Utilities.VectorNormalize (b - c)
+        k  = Utilities.VectorNormalize (numpy.cross (ca, j))
+        i  = Utilities.VectorNormalize (numpy.cross (j, k))
     
         psi = Pabcd * math.pi / 180.0
         t   = math.cos (psi) * i + math.sin (psi) * k
@@ -422,8 +415,8 @@ class ProteinModel (object):
     
         return (c + Rcd * q)
     
-    
-    def _CalculatePositionNormal (self, a, b, c, Rcd, Tbcd, Pabcd):
+    @staticmethod
+    def _CalculatePositionNormal (a, b, c, Rcd, Tbcd, Pabcd):
     #            (a) I
     #                 \
     #                  \
@@ -433,9 +426,9 @@ class ProteinModel (object):
     #                           L (d)
     #        values (Rij),(Tijk),(Pijkl),(Tjkl),(Rkl)
         ab  = a - b
-        j   = self._VectorNormalize (c - b)
-        k   = self._VectorNormalize (numpy.cross (ab, j))
-        i   = self._VectorNormalize (numpy.cross (j, k))
+        j   = Utilities.VectorNormalize (c - b)
+        k   = Utilities.VectorNormalize (numpy.cross (ab, j))
+        i   = Utilities.VectorNormalize (numpy.cross (j, k))
     
         psi = Pabcd * math.pi / 180.0
         t   = math.cos (psi) * i + math.sin (psi) * k
@@ -449,33 +442,8 @@ class ProteinModel (object):
     def _BuildEnergyModel (self):
         """Builds an energy model."""
         pass
-#        for (i, j) in self.pairs:
-#            chain = self.chains[i]
-#            residue = chain.residues[j]
-#
-#            #if (residue.label not in self.library):
-#            #    raise exceptions.StandardError ("Residue %s not found in the amino-library." % residue.label)
-#
-#            component = self.library[residue.label]
-#            component.GenerateAngles ()
-#            component.GenerateTorsions ()
-#            rotatableTorsions = self.rotatable[residue.label]
-#
-#            self._Write ("Collecting energy terms for residue %s..." % residue.Label ())
-#            self.torsionalTerms = []
-#
-#            for (labelb, labelc) in rotatableTorsions:
-#                (atomb, atomc) = (component[labelb], component[labelc])
-#                (tb, tc) = (atomb.atomType, atomc.atomType)
-#                torsionalParameters = self.parameters.GetTorsion (tb, tc)
-#
-#                if (torsionalParameters is None):
-#                    raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (tb, tc))
-#
-#                #self.torsionalTerms.append (torsionalParameters)
 
-
-    def _IdentifyRotatableAtoms (self):
+    def _IdentifyRotatableTorsions (self):
         for (i, j) in self.pairs:
             chain = self.chains[i]
             residue = chain.residues[j]
@@ -487,16 +455,46 @@ class ProteinModel (object):
             component.GenerateConnectivities ()
 
             rotatableTorsions = self.rotatable[residue.label]
+            self.torsions = []
 
             for (labelb, labelc) in rotatableTorsions:
-                rotateAtoms = []
                 roots = []
-                self._GetRotatableAtoms_r (labelb, labelc, component.connectivity, rotateAtoms, roots)
+                rotatableLabels = []
+                self._GetRotatableAtoms_r (labelb, labelc, component.connectivity, roots, rotatableLabels)
+                #rotatable = residue.LabelsToIndices (rotatableLabels)
 
-                self._Write ("Torsion X-%s-%s-X rotatable atoms: %s" % (labelb, labelc, " ".join (rotateAtoms)))
+                self._Write ("Torsion X-%s-%s-X rotatable atoms: %s" % (labelb, labelc, " ".join (rotatableLabels)))
+                self._Write ("Collecting energy terms:")
+
+                terms = []
+                for (a, b, c, d) in component.torsions:
+                    if ((b == labelb) and (c == labelc)) or ((b == labelc) and (c == labelb)):
+                        terms.append ((a, b, c, d))
+                        self._Write ("  %s-%s-%s-%s" % (a, b, c, d))
+
+                (atomb, atomc) = (component[labelb], component[labelc])
+                (tb, tc) = (atomb.atomType, atomc.atomType)
+                torsionalParameters = self.parameters.GetTorsion (tb, tc)
+                #Torsion(typeb='C4', typec='C4', k=1.5, periodicity=3, phase=0.0)
+
+                if (torsionalParameters is None):
+                    raise exceptions.StandardError ("Parameters for torsion X-%s-%s-X not found." % (tb, tc))
+
+                connections = component.connectivity[labelb]
+                for connection in connections:
+                    if (connection != labelc):
+                        break
+                labela = connection
+
+                atoms = [residue[labela], residue[labelb], residue[labelc], ]
+                for label in rotatableLabels:
+                    atoms.append (residue[label])
+
+                torsion = RotatableTorsion (atoms=atoms, parent=residue)
+                self.torsions.append (torsion) 
 
 
-    def _GetRotatableAtoms_r (self, precedingLabel, rootLabel, connectivityTable, atoms, roots):
+    def _GetRotatableAtoms_r (self, precedingLabel, rootLabel, connectivityTable, roots, atoms):
         connections = connectivityTable[rootLabel]
         roots.append (rootLabel)
 
@@ -504,7 +502,7 @@ class ProteinModel (object):
             if (connection != precedingLabel):
                 atoms.append (connection)
                 if (connection not in roots):
-                    self._GetRotatableAtoms_r (rootLabel, connection, connectivityTable, atoms, roots)
+                    self._GetRotatableAtoms_r (rootLabel, connection, connectivityTable, roots, atoms)
 
 
     def Optimize (self):
@@ -512,7 +510,7 @@ class ProteinModel (object):
         #if not hasattr (self, "energyModel"):
         #    self._BuildEnergyModel ()
 
-        self._IdentifyRotatableAtoms ()
+        self._IdentifyRotatableTorsions ()
 
 
     def SavePDB (self, filename="mutant.pdb"):
