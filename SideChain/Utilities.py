@@ -9,6 +9,10 @@ import numpy
 def VectorNormalize (vector):
     return (1.0 / numpy.linalg.norm (vector)) * vector
 
+def VectorNormalize2 (vector):
+    norm = numpy.linalg.norm (vector)
+    return ((1.0 / norm) * vector, norm)
+
 
 #===============================================================================
 # . Main program

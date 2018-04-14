@@ -90,16 +90,37 @@ class RotatableTorsion (ProteinContainer):
     def __init__ (self, atoms, parent):
         self.atoms = atoms
         self.parent = parent
-#        a   = atoms[0].coordinates
-#        b   = atoms[1].coordinates
-#        c   = atoms[2].coordinates
-#        ab  = a - b
-#        j   = Utilities.VectorNormalize (c - b)
-#        k   = Utilities.VectorNormalize (numpy.cross (ab, j))
-#        i   = Utilities.VectorNormalize (numpy.cross (j, k))
+
+    def __len__ (self):
+        return len (self.atoms)
+
+    def Print (self):
+        labels = []
+        for atom in self.atoms:
+            labels.append (atom.label)
+        print ("Torsion: %s-... %s" % ("-".join (labels[:3]), " ".join (labels[3:])))
 
     def Rotate (self, degree):
-        pass
+        a  = self.atoms[0].coordinates
+        b  = self.atoms[1].coordinates
+        c  = self.atoms[2].coordinates
+
+        ab = b - a
+        j  = Utilities.VectorNormalize (b - c)
+        k  = Utilities.VectorNormalize (numpy.cross (ab, j))
+        i  = Utilities.VectorNormalize (numpy.cross (j, k))
+
+        theta = degree * math.pi / 180.0
+        ip = math.cos (theta) * i + math.sin (theta) * k
+        kp = -math.sin (theta) * i + math.cos (theta) * k
+
+        for atom in self.atoms[3:]:
+            d    = (atom.coordinates - c)
+            di   = numpy.dot (d, i)
+            dj   = numpy.dot (d, j)
+            dk   = numpy.dot (d, k)
+            dnew = (di * ip + dj * j + dk * kp) + c
+            atom.coordinates = dnew
 
 
 class ProteinModel (object):
@@ -425,9 +446,9 @@ class ProteinModel (object):
     #                          \
     #                           L (d)
     #        values (Rij),(Tijk),(Pijkl),(Tjkl),(Rkl)
-        ab  = a - b
+        ba  = a - b
         j   = Utilities.VectorNormalize (c - b)
-        k   = Utilities.VectorNormalize (numpy.cross (ab, j))
+        k   = Utilities.VectorNormalize (numpy.cross (ba, j))
         i   = Utilities.VectorNormalize (numpy.cross (j, k))
     
         psi = Pabcd * math.pi / 180.0
