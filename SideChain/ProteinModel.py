@@ -110,17 +110,33 @@ class RotatableTorsion (ProteinContainer):
         k  = Utilities.VectorNormalize (numpy.cross (ab, j))
         i  = Utilities.VectorNormalize (numpy.cross (j, k))
 
+        B = numpy.empty (shape=(3, 3))  #, dtype=numpy.float
+        B[0, 0] = i[0]
+        B[1, 0] = i[1]
+        B[2, 0] = i[2]
+
+        B[0, 1] = j[0]
+        B[1, 1] = j[1]
+        B[2, 1] = j[2]
+
+        B[0, 2] = k[0]
+        B[1, 2] = k[1]
+        B[2, 2] = k[2]
+        Binv = numpy.linalg.inv (B)
+
         theta = degree * math.pi / 180.0
-        ip = math.cos (theta) * i + math.sin (theta) * k
-        kp = -math.sin (theta) * i + math.cos (theta) * k
+        cos = math.cos (theta)
+        sin = math.sin (theta)
+
+        R = numpy.identity (3)
+        R[0, 0] = cos
+        R[2, 0] = -sin
+        R[0, 2] = sin
+        R[2, 2] = cos
+        C = numpy.dot (B, numpy.dot (R, Binv))
 
         for atom in self.atoms[3:]:
-            d    = (atom.coordinates - c)
-            di   = numpy.dot (d, i)
-            dj   = numpy.dot (d, j)
-            dk   = numpy.dot (d, k)
-            dnew = (di * ip + dj * j + dk * kp) + c
-            atom.coordinates = dnew
+            atom.coordinates = c + numpy.dot (C, atom.coordinates - c)
 
 
 class ProteinModel (object):
