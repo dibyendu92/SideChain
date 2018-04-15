@@ -22,11 +22,10 @@ rotatableBonds = RotatableBonds ()
 pdb = PDBFile ("4pti.pdb")
 parameters = ParametersLibrary (filename=os.path.join ("toppar", "parm.lib"))
 
-mutations = (("A", 50, "ARG"), )    # ("A", 33, "MET"), 
+mutations = (("A", 50, "GLU"), )    # ("A", 33, "MET"), 
 protein = ProteinModel (pdb, library, internalLibrary, rotatableBonds, parameters, mutations)
 
 protein.Build ()
-protein.Mutate ()
 protein.Optimize ()
 protein.SavePDB ()
 
@@ -37,17 +36,3 @@ torsion.Print ()
 for (i, value) in enumerate (values):
     torsion.Rotate (degree=value)
     protein.SavePDB (filename="test%02d.pdb" % i)
-
-torsion = protein.torsions[1]
-torsion.Print ()
-
-for (j, value) in enumerate (values):
-    torsion.Rotate (degree=value)
-    protein.SavePDB (filename="test%02d.pdb" % (i + j))
-
-torsion = protein.torsions[2]
-torsion.Print ()
-
-for (k, value) in enumerate (values):
-    torsion.Rotate (degree=value)
-    protein.SavePDB (filename="test%02d.pdb" % (i + j + k))

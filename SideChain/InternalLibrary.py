@@ -70,7 +70,4 @@ class InternalLibrary (object):
         raise exceptions.StandardError ("Internal coordinates for component %s not found." % key)
 
 
-#===============================================================================
-# . Main program
-#===============================================================================
 if (__name__ == "__main__"): pass

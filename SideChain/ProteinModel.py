@@ -4,139 +4,18 @@
 # . Copyright : USC, Mikolaj Feliks (2018)
 # . License   : GNU GPL v3.0       (http://www.gnu.org/licenses/gpl-3.0.en.html)
 #-------------------------------------------------------------------------------
-import exceptions, math, numpy, random
+import exceptions
 
-import Utilities
+from ProteinChain import ProteinChain
+from ProteinResidue import ProteinResidue
+from ProteinAtom import ProteinAtom
+from RotatableTorsion import RotatableTorsion
+
 
 _BACKBONE_ATOMS = ("N", "CA", "C", "O", "+N", "+CA", "-C", )
 _SKIP_RESIDUES = ("HOH", "WAT", )
 
 _PDB_FORMAT_ATOM   = "%-6s%5d %-4s %3s %1s%4d%1s   %8.3f%8.3f%8.3f%22s\n"
-
-
-class ProteinContainer (object):
-    def __init__ (self, **kwargs):
-        for (key, value) in kwargs.items ():
-            setattr (self, key, value)
-
-
-class ProteinChain (ProteinContainer):
-    def AddResidue (self, residue):
-        if not hasattr (self, "residues"):
-            self.residues = []
-        self.residues.append (residue)
-
-
-class ProteinResidue (ProteinContainer):
-    def AddAtom (self, atom, reorder=False):
-        if not hasattr (self, "atoms"):
-            self.atoms = []
-        if (atom.label not in self):
-            if (reorder):
-                atom.serial = self.atoms[-1].serial + 1
-            self.atoms.append (atom)
-
-    def Label (self):
-        return "%s.%s.%d" % (self.parent.label, self.label, self.serial)
-
-    def __contains__ (self, label):
-        if hasattr (self, "atoms"):
-            for atom in self.atoms:
-                if (label == atom.label):
-                    return True
-        return False
-
-    def __getitem__ (self, label):
-        if hasattr (self, "atoms"):
-            for atom in self.atoms:
-                if (label == atom.label):
-                    return atom
-        raise exceptions.StandardError ("Atom %s not found in residue %s.%d.%s" % (label, self.parent.label, self.serial, self.label))
-
-    def GetIndex (self, label):
-        if (label in self):
-            for (i, atom) in enumerate (self.atoms):
-                if (label == atom.label):
-                    return i
-        return -1
-
-    def LabelsToIndices (self, labels):
-        indices = []
-        for (i, atom) in enumerate (self.atoms):
-            if (atom.label in labels):
-                indices.append (i)
-        return indices
-
-    @property
-    def natoms (self):
-        if hasattr (self, "atoms"):
-            return len (self.atoms)
-        return 0
-
-
-class ProteinAtom (ProteinContainer):
-    @property
-    def coordinates (self):
-        return numpy.array ((self.x, self.y, self.z))
-
-    @coordinates.setter
-    def coordinates (self, array):
-        self.x = array[0]
-        self.y = array[1]
-        self.z = array[2]
-
-
-class RotatableTorsion (ProteinContainer):
-    def __init__ (self, atoms, parent):
-        self.atoms = atoms
-        self.parent = parent
-
-    def __len__ (self):
-        return len (self.atoms)
-
-    def Print (self):
-        labels = []
-        for atom in self.atoms:
-            labels.append (atom.label)
-        print ("Torsion: %s-... %s" % ("-".join (labels[:3]), " ".join (labels[3:])))
-
-    def Rotate (self, degree):
-        a  = self.atoms[0].coordinates
-        b  = self.atoms[1].coordinates
-        c  = self.atoms[2].coordinates
-
-        ab = b - a
-        j  = Utilities.VectorNormalize (b - c)
-        k  = Utilities.VectorNormalize (numpy.cross (ab, j))
-        i  = Utilities.VectorNormalize (numpy.cross (j, k))
-
-        B = numpy.empty (shape=(3, 3))  #, dtype=numpy.float
-        B[0, 0] = i[0]
-        B[1, 0] = i[1]
-        B[2, 0] = i[2]
-
-        B[0, 1] = j[0]
-        B[1, 1] = j[1]
-        B[2, 1] = j[2]
-
-        B[0, 2] = k[0]
-        B[1, 2] = k[1]
-        B[2, 2] = k[2]
-        Binv = numpy.linalg.inv (B)
-
-        theta = degree * math.pi / 180.0
-        cos = math.cos (theta)
-        sin = math.sin (theta)
-
-        R = numpy.identity (3)
-        R[0, 0] = cos
-        R[2, 0] = -sin
-        R[0, 2] = sin
-        R[2, 2] = cos
-        C = numpy.dot (B, numpy.dot (R, Binv))
-
-        for atom in self.atoms[3:]:
-            atom.coordinates = c + numpy.dot (C, atom.coordinates - c)
 
 
 class ProteinModel (object):
@@ -217,16 +96,7 @@ class ProteinModel (object):
 
 
     def Build (self, skipChains=None, skipResidues=_SKIP_RESIDUES):
-        """Builds a protein model.
-
-        Residues that are subject to mutation start with empty side-chains."""
-        # natoms=0
-        # for residue in self.pdb.residues:
-        #     natoms+=self._CalculateResidueAtoms (residue, skipChains, skipResidues)
-        # self.coordinates = numpy.empty ((natoms, 3))
-        # 
-        # self._Write ("Array allocated for %d atoms." % natoms)
-
+        """Builds a protein model."""
         chainLabels = set ()
         for pdbResidue in self.pdb.residues:
             if (skipChains != None):
@@ -236,7 +106,7 @@ class ProteinModel (object):
 
         self.chains = []
         self.pairs = []
-        begin = 0
+        serial = 1
 
         for (i, chainLabel) in enumerate (chainLabels):
             chain = ProteinChain (label=chainLabel)
@@ -246,40 +116,36 @@ class ProteinModel (object):
                     continue
 
                 if (pdbResidue.chain == chainLabel):
+                    targetLabel = pdbResidue.label
+                    excludeLabels = []
+
                     isMutated = self._CheckIfMutated (chainLabel, pdbResidue.serial)
                     if (isMutated):
+                        targetLabel = isMutated
+                        for pdbAtom in pdbResidue.atoms:
+                            if (pdbAtom.label not in _BACKBONE_ATOMS):
+                                excludeLabels.append (pdbAtom.label)
                         pair = (i, j)
                         self.pairs.append (pair)
-                        targetLabel = isMutated
-                        residue = ProteinResidue (label = targetLabel, 
-                                                  serial = pdbResidue.serial, 
-                                                  begin = begin, 
-                                                  parent = chain )
 
-                        for pdbAtom in pdbResidue.atoms:
-                            if (pdbAtom.label in _BACKBONE_ATOMS):
-                                atom = ProteinAtom (label = pdbAtom.label, 
-                                                    serial = pdbAtom.serial, 
-                                                    x = pdbAtom.x, 
-                                                    y = pdbAtom.y, 
-                                                    z = pdbAtom.z, 
-                                                    parent = residue )
-                                residue.AddAtom (atom)
-                        chain.AddResidue (residue)
-                    else:
-                        residue = ProteinResidue (label = pdbResidue.label, 
-                                                  serial = pdbResidue.serial, 
-                                                  begin = begin, 
-                                                  parent = chain )
-                        for pdbAtom in pdbResidue.atoms:
+                    residue = ProteinResidue (label = targetLabel, 
+                                              serial = pdbResidue.serial, 
+                                              parent = chain )
+
+                    for pdbAtom in pdbResidue.atoms:
+                        if (pdbAtom.label not in excludeLabels):
                             atom = ProteinAtom (label = pdbAtom.label, 
-                                                serial = pdbAtom.serial, 
+                                                serial = serial, 
                                                 x = pdbAtom.x, 
                                                 y = pdbAtom.y, 
                                                 z = pdbAtom.z, 
                                                 parent = residue )
                             residue.AddAtom (atom)
-                        chain.AddResidue (residue)
+                            serial += 1
+                    if (isMutated):
+                        serial = self._BuildResidue (residue, serial)
+
+                    chain.AddResidue (residue)
             self.chains.append (chain)
 
         for chain in self.chains:
@@ -310,23 +176,6 @@ class ProteinModel (object):
                     for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in ictable:
                         if (hydrogen == l):
                             internal = (i, j, k, distanceRight, angleRight, torsion, improper)
-                            self._AddAtom (residue, hydrogen, internal)
-
-
-    def _AddAtom (self, residue, label, internal):
-        (a, b, c, distance, angle, torsion, improper) = internal
-
-        pa = residue[a].coordinates
-        pb = residue[b].coordinates
-        pc = residue[c].coordinates
-        
-        CalculatePosition = self._CalculatePositionImproper if (improper) else self._CalculatePositionNormal
-        pd = CalculatePosition (pa, pb, pc, distance, angle, torsion)
-        
-        atom = ProteinAtom (label=label, serial=-1, x=pd[0], y=pd[1], z=pd[2], parent=residue)
-        residue.AddAtom (atom, reorder=True)
-
-        self._Write ("Added atom %s to residue %s" % (label, residue.Label ()))
 
 
     @staticmethod
@@ -358,52 +207,49 @@ class ProteinModel (object):
             self._BuildSequence_r (internalCoordinates, connectivityTable, otherLabel, sequence, unmet)
 
 
-    def Mutate (self):
-        """Adds missing atoms to mutated residues based on internal coordinates.
+    def _BuildResidue (self, residue, atomSerial):
+        """Adds missing atoms to a mutated residue based on internal coordinates.
 
         The format of internal coordinates is described in:
         https://www.charmm.org/charmm/documentation/by-version/c40b1/params/doc/intcor/"""
 
-        for (chainLabel, residueSerial, residueTargetLabel) in self.mutations:
-            found = self._FindMutation (chainLabel, residueSerial)
-            if (not found):
-                raise exceptions.StandardError ("Residue %s.%d not found in the protein." % (chainLabel, residueSerial))
-            (i, j) = found
-            chain = self.chains[i]
-            residue = chain.residues[j]
+        if (residue.label not in self.library):
+            raise exceptions.StandardError ("Residue %s not found in the amino-library." % residue.label)
 
-            if (residue.label not in self.library):
-                raise exceptions.StandardError ("Residue %s not found in the amino-library." % residue.label)
+        component = self.library[residue.label]
+        component.GenerateConnectivities ()
 
-            component = self.library[residue.label]
-            component.GenerateConnectivities ()
+        if (residue.label not in self.internal):
+            raise exceptions.StandardError ("Residue %s not found in the internal coordinate library." % residue.label)
+        ictable = self.internal[residue.label]
 
-            if (residue.label not in self.internal):
-                raise exceptions.StandardError ("Residue %s not found in the internal coordinate library." % residue.label)
-            ictable = self.internal[residue.label]
+        # rootLabel = "CA"
+        # sequence = []
+        # unmet = []
+        # self._BuildSequence_r (ictable, component.connectivity, rootLabel, sequence, unmet)
+        # 
+        # self._Write ("Adding atoms for %s in sequence: %s" % (residue.Label (), " ".join (sequence)))
+        # 
+        # for label in sequence:
+        #     internal = self._SearchInternal (ictable, label)
+        #     self._AddAtom (residue, label, internal)
 
-            # rootLabel = "CA"
-            # sequence = []
-            # unmet = []
-            # self._BuildSequence_r (ictable, component.connectivity, rootLabel, sequence, unmet)
-            # 
-            # self._Write ("Adding atoms for %s in sequence: %s" % (residue.Label (), " ".join (sequence)))
-            # 
-            # for label in sequence:
-            #     internal = self._SearchInternal (ictable, label)
-            #     self._AddAtom (residue, label, internal)
+        # . Internal coordinate tables from CHARMM seem to already contain atoms in "safe" sequences.
 
-            # . Internal coordinate tables from CHARMM seem to already contain atoms in "safe" sequences.
+        for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in ictable:
+            tests = []
+            for label in (i, j, k, l):
+                tests.append ((label[0] == "-") or (label[0] == "+"))
+            if any (tests):
+                continue
+            if (l not in residue):
+                internal = (i, j, k, distanceRight, angleRight, torsion, improper)
+                residue.AddAtomFromIC (l, atomSerial, internal)
+                atomSerial += 1
 
-            for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in ictable:
-                tests = []
-                for label in (i, j, k, l):
-                    tests.append ((label[0] == "-") or (label[0] == "+"))
-                if any (tests):
-                    continue
-                if (l not in residue):
-                    internal = (i, j, k, distanceRight, angleRight, torsion, improper)
-                    self._AddAtom (residue, l, internal)
+                self._Write ("Added atom %s to residue %s" % (label, residue.Label ()))
+
+        return atomSerial
 
 
     @staticmethod
@@ -428,52 +274,6 @@ class ProteinModel (object):
             if all (checks):
                 return i
         return -1
-
-    @staticmethod
-    def _CalculatePositionImproper (a, b, c, Rcd, Tbcd, Pabcd):
-    #                I (a)    L (d)
-    #                 \     /
-    #                  \   /
-    #                   *K (c)
-    #                   |
-    #                   |
-    #                   J (b)
-    #        values (Rik),(Tikj),(Pijkl),T(jkl),(Rkl)
-        ca = a - c
-        j  = Utilities.VectorNormalize (b - c)
-        k  = Utilities.VectorNormalize (numpy.cross (ca, j))
-        i  = Utilities.VectorNormalize (numpy.cross (j, k))
-    
-        psi = Pabcd * math.pi / 180.0
-        t   = math.cos (psi) * i + math.sin (psi) * k
-    
-        chi = Tbcd * math.pi / 180.0
-        q   = math.cos (chi) * j + math.sin (chi) * t
-    
-        return (c + Rcd * q)
-    
-    @staticmethod
-    def _CalculatePositionNormal (a, b, c, Rcd, Tbcd, Pabcd):
-    #            (a) I
-    #                 \
-    #                  \
-    #               (b) J----K (c)
-    #                         \
-    #                          \
-    #                           L (d)
-    #        values (Rij),(Tijk),(Pijkl),(Tjkl),(Rkl)
-        ba  = a - b
-        j   = Utilities.VectorNormalize (c - b)
-        k   = Utilities.VectorNormalize (numpy.cross (ba, j))
-        i   = Utilities.VectorNormalize (numpy.cross (j, k))
-    
-        psi = Pabcd * math.pi / 180.0
-        t   = math.cos (psi) * i + math.sin (psi) * k
-   
-        chi = Tbcd * math.pi / 180.0
-        q   = -math.cos (chi) * j + math.sin (chi) * t
- 
-        return (c + Rcd * q)
 
 
     def _BuildEnergyModel (self):
@@ -559,7 +359,4 @@ class ProteinModel (object):
         output.close ()
 
 
-#===============================================================================
-# . Main program
-#===============================================================================
 if (__name__ == "__main__"): pass
