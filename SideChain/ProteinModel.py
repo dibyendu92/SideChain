@@ -60,7 +60,6 @@ class ProteinModel (object):
             if hasattr (self, "prompt"):
                 print ("%s%s" % (self.prompt, message))
 
-
     def _FindMutation (self, label, serial):
         for (i, chain) in enumerate (self.chains):
             for (j, residue) in enumerate (chain.residues):
@@ -68,31 +67,30 @@ class ProteinModel (object):
                     return (i, j)
         return None
 
-
     def _CheckIfMutated (self, label, serial):
         for (chainLabel, residueSerial, residueTargetLabel) in self.mutations:
             if ((chainLabel == label) and (residueSerial == serial)):
                 return residueTargetLabel
         return None
 
+    def _AddChain (self, chain, build=True):
+        if (build):
+            if not hasattr (self, "chains"):
+                self.chains = []
+            for other in self.chains:
+                if (other.label == chain.label):
+                    raise exceptions.StandardError ("Chain %s already exists in the protein." % chain.label)
+            self.chains.append (chain)
 
-    def _CalculateResidueAtoms (self, pdbResidue, skipChains, skipResidues):
-        natoms=0
-        if (pdbResidue.chain not in skipChains):
-            if (pdbResidue.label not in skipResidues):
-                isMutated = self._CheckIfMutated (pdbResidue.chain, pdbResidue.serial)
-                if (isMutated):
-                    for pdbAtom in pdbResidue.atoms:
-                        if (pdbAtom.label in _BACKBONE_ATOMS):
-                            natoms+=1
-                    targetLabel = isMutated
-                    component = self.library[targetLabel]
-                    for atom in component.atoms:
-                        if (atom.atomLabel not in _BACKBONE_ATOMS):
-                            natoms+=1
-                else:
-                    natoms+=len (pdbResidue.atoms)
-        return natoms
+    def _AddPair (self, pair, build=True):
+        if (build):
+            if not hasattr (self, "pairs"):
+                self.pairs = []
+            (chain, residue) = pair
+            for (otherChain, otherResidue) in self.pairs:
+                if ((chain == otherChain) and (residue == otherResidue)):
+                    raise exceptions.StandardError ("Mutated pair (%s, %s) already exists in the protein." % (chain, residue))
+            self.pairs.append (pair)
 
 
     def Build (self, skipChains=None, skipResidues=_SKIP_RESIDUES):
@@ -104,12 +102,21 @@ class ProteinModel (object):
                     continue
             chainLabels.add (pdbResidue.chain)
 
-        self.chains = []
-        self.pairs = []
-        serial = 1
+        natoms = self._Build (chainLabels, skipResidues, build=False)
+        self._Write ("Allocate space for %d atoms." % natoms)
 
+        self._Build (chainLabels, skipResidues)
+
+        for chain in self.chains:
+            self._Write ("Chain: %s (%d residues)" % (chain.label, len (chain.residues)))
+        self._Write ("Created model chain:residue:protein")
+
+
+    def _Build (self, chainLabels, skipResidues, build=True):
+        serial = 1
         for (i, chainLabel) in enumerate (chainLabels):
-            chain = ProteinChain (label=chainLabel)
+            chain = ProteinChain (label = chainLabel, 
+                                  parent = self )
 
             for (j, pdbResidue) in enumerate (self.pdb.residues):
                 if (pdbResidue.label in skipResidues):
@@ -126,7 +133,7 @@ class ProteinModel (object):
                             if (pdbAtom.label not in _BACKBONE_ATOMS):
                                 excludeLabels.append (pdbAtom.label)
                         pair = (i, j)
-                        self.pairs.append (pair)
+                        self._AddPair (pair, build=build)
 
                     residue = ProteinResidue (label = targetLabel, 
                                               serial = pdbResidue.serial, 
@@ -140,42 +147,39 @@ class ProteinModel (object):
                                                 y = pdbAtom.y, 
                                                 z = pdbAtom.z, 
                                                 parent = residue )
-                            residue.AddAtom (atom)
+                            residue._AddAtom (atom, build=build)
                             serial += 1
                     if (isMutated):
-                        serial = self._BuildResidue (residue, serial)
+                        serial = self._BuildResidue (residue, serial, build=build)
 
-                    chain.AddResidue (residue)
-            self.chains.append (chain)
-
-        for chain in self.chains:
-            self._Write ("Chain: %s (%d residues)" % (chain.label, len (chain.residues)))
-        self._Write ("Created model chain:residue:protein")
+                    chain._AddResidue (residue, build=build)
+            self._AddChain (chain, build=build)
+        return (serial - 1)
 
 
-    def AddHydrogens (self):
-        """Adds missing hydrogens."""
-
-        for chain in self.chains:
-            for residue in chain.residues:
-                if (residue.label not in self.library):
-                    raise exceptions.StandardError ("Residue %s not found in the amino-acid library." % residue.label)
-                component = self.library[residue.label]
-
-                hydrogens = []
-                for atom in component.atoms:
-                    if (atom.atomLabel[0] == "H"):
-                        if (atom.atomLabel not in residue):
-                            hydrogens.append (atom.atomLabel)
-
-                if (residue.label not in self.internal):
-                    raise exceptions.StandardError ("Residue %s not found in the internal coordinate library." % residue.label)
-                ictable = self.internal[residue.label]
-
-                for hydrogen in hydrogens:
-                    for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in ictable:
-                        if (hydrogen == l):
-                            internal = (i, j, k, distanceRight, angleRight, torsion, improper)
+#    def AddHydrogens (self):
+#        """Adds missing hydrogens."""
+#
+#        for chain in self.chains:
+#            for residue in chain.residues:
+#                if (residue.label not in self.library):
+#                    raise exceptions.StandardError ("Residue %s not found in the amino-acid library." % residue.label)
+#                component = self.library[residue.label]
+#
+#                hydrogens = []
+#                for atom in component.atoms:
+#                    if (atom.atomLabel[0] == "H"):
+#                        if (atom.atomLabel not in residue):
+#                            hydrogens.append (atom.atomLabel)
+#
+#                if (residue.label not in self.internal):
+#                    raise exceptions.StandardError ("Residue %s not found in the internal coordinate library." % residue.label)
+#                ictable = self.internal[residue.label]
+#
+#                for hydrogen in hydrogens:
+#                    for (i, j, k, l, distanceLeft, angleLeft, torsion, angleRight, distanceRight, improper) in ictable:
+#                        if (hydrogen == l):
+#                            internal = (i, j, k, distanceRight, angleRight, torsion, improper)
 
 
     @staticmethod
@@ -191,7 +195,6 @@ class ProteinModel (object):
         for otherLabel in connections:
             if ((otherLabel in _BACKBONE_ATOMS) or (otherLabel in sequence)):
                 continue
-
             internal = self._SearchInternal (internalCoordinates, otherLabel)
             (a, b, c, distance, angle, torsion, improper) = internal
 
@@ -207,7 +210,7 @@ class ProteinModel (object):
             self._BuildSequence_r (internalCoordinates, connectivityTable, otherLabel, sequence, unmet)
 
 
-    def _BuildResidue (self, residue, atomSerial):
+    def _BuildResidue (self, residue, atomSerial, build=True):
         """Adds missing atoms to a mutated residue based on internal coordinates.
 
         The format of internal coordinates is described in:
@@ -244,10 +247,11 @@ class ProteinModel (object):
                 continue
             if (l not in residue):
                 internal = (i, j, k, distanceRight, angleRight, torsion, improper)
-                residue.AddAtomFromIC (l, atomSerial, internal)
+                residue._AddAtomFromIC (l, atomSerial, internal, build=build)
                 atomSerial += 1
 
-                self._Write ("Added atom %s to residue %s" % (label, residue.Label ()))
+                if (build):
+                    self._Write ("Added atom %s to residue %s" % (l, residue.Label ()))
 
         return atomSerial
 
@@ -357,6 +361,5 @@ class ProteinModel (object):
                 for atom in residue.atoms:
                     output.write (_PDB_FORMAT_ATOM % ("ATOM", atom.serial, atom.label, residue.label, chain.label, residue.serial, "", atom.x, atom.y, atom.z, "SEGM"))
         output.close ()
-
 
 if (__name__ == "__main__"): pass

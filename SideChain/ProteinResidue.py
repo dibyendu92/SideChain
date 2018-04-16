@@ -24,7 +24,7 @@ class ProteinResidue (ProteinContainer):
             for atom in self.atoms:
                 if (label == atom.label):
                     return atom
-        raise exceptions.StandardError ("Atom %s not found in residue %s.%d.%s" % (label, self.parent.label, self.serial, self.label))
+        raise exceptions.StandardError ("Atom %s not found in residue %s" % (label, self.Label ()))
 
     @property
     def natoms (self):
@@ -32,37 +32,44 @@ class ProteinResidue (ProteinContainer):
             return len (self.atoms)
         return 0
 
-    def AddAtom (self, atom):
-        if not hasattr (self, "atoms"):
-            self.atoms = []
-        if (atom.label not in self):
+    def _AddAtom (self, atom, build=True):
+        if (build):
+            if not hasattr (self, "atoms"):
+                self.atoms = []
+            if (atom.label in self):
+                raise exceptions.StandardError ("Atom %s already exists in residue %s" % (label, self.Label ()))
             self.atoms.append (atom)
 
-    def AddAtomFromIC (self, label, serial, internal):
-        (a, b, c, distance, angle, torsion, improper) = internal
+#            residue = self.parent
+#            chain = residue.parent
+#            protein = chain.parent
+#            protein._Write ("Added atom %s to residue %s" % (atom.label, residue.Label ()))
 
-        pa = self[a].coordinates
-        pb = self[b].coordinates
-        pc = self[c].coordinates
-        
-        CalculatePosition = CalculatePositionImproper if (improper) else CalculatePositionNormal
-        pd = CalculatePosition (pa, pb, pc, distance, angle, torsion)
-        
-        atom = ProteinAtom (label=label, serial=serial, x=pd[0], y=pd[1], z=pd[2], parent=self)
-        self.AddAtom (atom)
+    def _AddAtomFromIC (self, label, serial, internal, build=True):
+        if (build):
+            (a, b, c, distance, angle, torsion, improper) = internal
+            pa = self[a].coordinates
+            pb = self[b].coordinates
+            pc = self[c].coordinates
+            
+            CalculatePosition = CalculatePositionImproper if (improper) else CalculatePositionNormal
+            pd = CalculatePosition (pa, pb, pc, distance, angle, torsion)
+            
+            atom = ProteinAtom (label=label, serial=serial, x=pd[0], y=pd[1], z=pd[2], parent=self)
+            self._AddAtom (atom)
 
 
     def Label (self):
         return "%s.%s.%d" % (self.parent.label, self.label, self.serial)
 
-    def GetIndex (self, label):
+    def _GetIndex (self, label):
         if (label in self):
             for (i, atom) in enumerate (self.atoms):
                 if (label == atom.label):
                     return i
         return -1
 
-    def LabelsToIndices (self, labels):
+    def _LabelsToIndices (self, labels):
         indices = []
         for (i, atom) in enumerate (self.atoms):
             if (atom.label in labels):
