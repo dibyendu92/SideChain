@@ -4,7 +4,7 @@
 # . Copyright : USC, Mikolaj Feliks (2018)
 # . License   : GNU GPL v3.0       (http://www.gnu.org/licenses/gpl-3.0.en.html)
 #-------------------------------------------------------------------------------
-import exceptions
+import exceptions, numpy
 
 from ProteinChain import ProteinChain
 from ProteinResidue import ProteinResidue
@@ -102,8 +102,11 @@ class ProteinModel (object):
                     continue
             chainLabels.add (pdbResidue.chain)
 
+        self.coordinates = None
         natoms = self._Build (chainLabels, skipResidues, build=False)
-        self._Write ("Allocate space for %d atoms." % natoms)
+
+        self.coordinates = numpy.empty (shape=(natoms, 3))
+        self._Write ("Allocated space for %d atoms." % natoms)
 
         self._Build (chainLabels, skipResidues)
 
@@ -146,7 +149,8 @@ class ProteinModel (object):
                                                 x = pdbAtom.x, 
                                                 y = pdbAtom.y, 
                                                 z = pdbAtom.z, 
-                                                parent = residue )
+                                                parent = residue ,
+                                                proteinCoordinates = self.coordinates )
                             residue._AddAtom (atom, build=build)
                             serial += 1
                     if (isMutated):

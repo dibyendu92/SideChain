@@ -54,8 +54,9 @@ class ProteinResidue (ProteinContainer):
             
             CalculatePosition = CalculatePositionImproper if (improper) else CalculatePositionNormal
             pd = CalculatePosition (pa, pb, pc, distance, angle, torsion)
-            
-            atom = ProteinAtom (label=label, serial=serial, x=pd[0], y=pd[1], z=pd[2], parent=self)
+
+            proteinCoordinates = self.parent.parent.coordinates
+            atom = ProteinAtom (label=label, serial=serial, x=pd[0], y=pd[1], z=pd[2], parent=self, proteinCoordinates=proteinCoordinates)
             self._AddAtom (atom)
 
 
