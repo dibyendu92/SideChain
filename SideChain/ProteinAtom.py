@@ -15,9 +15,9 @@ class ProteinAtom (ProteinContainer):
         return self._coordinates[self.serial-1, :]
 
     @coordinates.setter
-    def coordinates (self, array):
+    def coordinates (self, vector):
         for i in range (3):
-            self._coordinates[self.serial-1, i] = array[i]
+            self._coordinates[self.serial-1, i] = vector[i]
 
     @property
     def x (self):
@@ -49,7 +49,7 @@ class ProteinAtom (ProteinContainer):
         self.parent = parent
         self._coordinates = proteinCoordinates
 
-        if (self._coordinates != None):
+        if (self._coordinates.size > 0):
             component = (x, y, z)
             for i in range (3):
                 self._coordinates[self.serial-1, i] = component[i]

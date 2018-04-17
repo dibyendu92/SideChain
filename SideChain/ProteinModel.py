@@ -13,7 +13,9 @@ from RotatableTorsion import RotatableTorsion
 
 
 _BACKBONE_ATOMS = ("N", "CA", "C", "O", "+N", "+CA", "-C", )
+_SKIP_CHAINS = (), 
 _SKIP_RESIDUES = ("HOH", "WAT", )
+_SKIP_ATOMS = ("OXT", "DUM", )
 
 _PDB_FORMAT_ATOM   = "%-6s%5d %-4s %3s %1s%4d%1s   %8.3f%8.3f%8.3f%22s\n"
 
@@ -55,7 +57,7 @@ class ProteinModel (object):
             return natoms
         return 0
 
-    def _Write (self, message):
+    def _Text (self, message):
         if (self.verbose):
             if hasattr (self, "prompt"):
                 print ("%s%s" % (self.prompt, message))
@@ -93,29 +95,28 @@ class ProteinModel (object):
             self.pairs.append (pair)
 
 
-    def Build (self, skipChains=None, skipResidues=_SKIP_RESIDUES):
+    def Build (self, skipChains=_SKIP_CHAINS, skipResidues=_SKIP_RESIDUES, skipAtoms=_SKIP_ATOMS):
         """Builds a protein model."""
         chainLabels = set ()
         for pdbResidue in self.pdb.residues:
-            if (skipChains != None):
-                if (pdbResidue.chain in skipChains):
-                    continue
+            if (pdbResidue.chain in skipChains):
+                continue
             chainLabels.add (pdbResidue.chain)
 
-        self.coordinates = None
-        natoms = self._Build (chainLabels, skipResidues, build=False)
+        self.coordinates = numpy.array ([])
+        natoms = self._Build (chainLabels, skipResidues, skipAtoms, build=False)
 
         self.coordinates = numpy.empty (shape=(natoms, 3))
-        self._Write ("Allocated space for %d atoms." % natoms)
+        self._Text ("Allocated space for %d atoms." % natoms)
 
-        self._Build (chainLabels, skipResidues)
+        self._Build (chainLabels, skipResidues, skipAtoms)
+        self._Text ("Built model chain:residue:protein")
 
         for chain in self.chains:
-            self._Write ("Chain: %s (%d residues)" % (chain.label, len (chain.residues)))
-        self._Write ("Created model chain:residue:protein")
+            self._Text ("Chain: %s (%d residues)" % (chain.label, len (chain.residues)))
 
 
-    def _Build (self, chainLabels, skipResidues, build=True):
+    def _Build (self, chainLabels, skipResidues, skipAtoms, build=True):
         serial = 1
         for (i, chainLabel) in enumerate (chainLabels):
             chain = ProteinChain (label = chainLabel, 
@@ -127,7 +128,7 @@ class ProteinModel (object):
 
                 if (pdbResidue.chain == chainLabel):
                     targetLabel = pdbResidue.label
-                    excludeLabels = []
+                    excludeLabels = list (skipAtoms)
 
                     isMutated = self._CheckIfMutated (chainLabel, pdbResidue.serial)
                     if (isMutated):
@@ -235,7 +236,7 @@ class ProteinModel (object):
         # unmet = []
         # self._BuildSequence_r (ictable, component.connectivity, rootLabel, sequence, unmet)
         # 
-        # self._Write ("Adding atoms for %s in sequence: %s" % (residue.Label (), " ".join (sequence)))
+        # self._Text ("Adding atoms for %s in sequence: %s" % (residue.Label (), " ".join (sequence)))
         # 
         # for label in sequence:
         #     internal = self._SearchInternal (ictable, label)
@@ -255,8 +256,7 @@ class ProteinModel (object):
                 atomSerial += 1
 
                 if (build):
-                    self._Write ("Added atom %s to residue %s" % (l, residue.Label ()))
-
+                    self._Text ("Added atom %s to residue %s" % (l, residue.Label ()))
         return atomSerial
 
 
@@ -286,13 +286,43 @@ class ProteinModel (object):
 
     def _BuildEnergyModel (self):
         """Builds an energy model."""
-        pass
+        self.nonbonded = numpy.empty (shape=(self.natoms, 3))
+
+        for chain in self.chains:
+            for residue in chain.residues:
+                if (residue.label not in self.library):
+                    raise exceptions.StandardError ("Residue %s not found in the amino-library." % residue.label)
+                component = self.library[residue.label]
+
+                for atom in residue.atoms:
+                    if (atom.label not in component):
+                        raise exceptions.StandardError ("Residue %s: Atom %s not found in the amino-library." % (residue.Label (), atom.label))
+                    (label, atype, charge) = component[atom.label]
+
+                    params = self.parameters.GetVDW (atype)
+                    if (not params):
+                        raise exceptions.StandardError ("Residue %s: VDW parameters for atom %s not found." % (residue.Label (), atom.label))
+                    (atype, attractive, repulsive, mass) = params
+
+                    self.nonbonded[atom.serial-1, 0] = attractive
+                    self.nonbonded[atom.serial-1, 1] = repulsive
+                    self.nonbonded[atom.serial-1, 2] = charge
+
+        for (i, j) in self.pairs:
+            chain = self.chains[i]
+            residue = chain.residues[j]
+
+            indices = []
+            for atom in residue.atoms:
+                indices.append (atom.serial-1)
+            #print indices
+
 
     def _IdentifyRotatableTorsions (self):
         for (i, j) in self.pairs:
             chain = self.chains[i]
             residue = chain.residues[j]
-            self._Write ("Generating torsions for residue %s..." % residue.Label ())
+            self._Text ("Generating torsions for residue %s..." % residue.Label ())
 
             component = self.library[residue.label]
             component.GenerateAngles ()
@@ -308,14 +338,14 @@ class ProteinModel (object):
                 self._GetRotatableAtoms_r (labelb, labelc, component.connectivity, roots, rotatableLabels)
                 #rotatable = residue.LabelsToIndices (rotatableLabels)
 
-                self._Write ("Torsion X-%s-%s-X rotatable atoms: %s" % (labelb, labelc, " ".join (rotatableLabels)))
-                self._Write ("Collecting energy terms:")
+                self._Text ("Torsion X-%s-%s-X rotatable atoms: %s" % (labelb, labelc, " ".join (rotatableLabels)))
+                self._Text ("Collecting energy terms:")
 
                 terms = []
                 for (a, b, c, d) in component.torsions:
                     if ((b == labelb) and (c == labelc)) or ((b == labelc) and (c == labelb)):
                         terms.append ((a, b, c, d))
-                        self._Write ("  %s-%s-%s-%s" % (a, b, c, d))
+                        self._Text ("  %s-%s-%s-%s" % (a, b, c, d))
 
                 (atomb, atomc) = (component[labelb], component[labelc])
                 (tb, tc) = (atomb.atomType, atomc.atomType)
@@ -352,8 +382,7 @@ class ProteinModel (object):
 
     def Optimize (self):
         """Optimizes side-chain positions with Monte Carlo."""
-        #if not hasattr (self, "energyModel"):
-        #    self._BuildEnergyModel ()
+        self._BuildEnergyModel ()
 
         self._IdentifyRotatableTorsions ()
 
